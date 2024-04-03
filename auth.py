@@ -2,6 +2,7 @@ from fastapi.security import OAuth2PasswordBearer
 from passlib.context import CryptContext
 from datetime import datetime, timedelta
 import jwt
+import re 
 
 SECRET_KEY = "your_secret_key"
 ALGORITHM = "HS256"
@@ -19,3 +20,21 @@ def create_access_token(data: dict):
 
 def get_password_hash(password: str) -> str:
     return pwd_context.hash(password)
+
+def email_is_valid(email: str) -> bool:
+    # Regular expression pattern for email validation
+    pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+    
+    # Check if the email matches the pattern
+    if re.match(pattern, email):
+        return True
+    else:
+        return False
+
+def is_password_complex(password: str) -> bool:
+    # Regular expression pattern for password complexity
+    pattern = r"^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}$"
+    if bool(re.match(pattern, password)):
+        return True
+    else:
+        return False

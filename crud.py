@@ -35,21 +35,6 @@ def create_user(db: Session, user_data: UserCreate):
     db.refresh(db_user)
     return db_user
 
-def email_is_valid(email: str) -> bool:
-    # Regular expression pattern for email validation
-    pattern = r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$"
-    
-    # Check if the email matches the pattern
-    if re.match(pattern, email):
-        return True
-    else:
-        return False
-
-def is_password_complex(password: str) -> bool:
-    # Regular expression pattern for password complexity
-    pattern = r"^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}$"
-    return bool(re.match(pattern, password))
-
 def create_master_developer(db: Session, name: str, team_lead: bool):
     developer = MasterDeveloper(name=name, team_lead=team_lead)
     db.add(developer)

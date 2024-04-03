@@ -47,11 +47,11 @@ async def register_user(
         raise HTTPException(status_code=400, detail="All fields are required")
 
     # Check email format
-    if not crud.email_is_valid(email):
+    if (auth.email_is_valid(email) == False):
         raise HTTPException(status_code=400, detail="Invalid email format")
 
     # Check password complexity
-    if not crud.is_password_complex(password):
+    if (auth.is_password_complex(password) == False):
         raise HTTPException(status_code=400, detail="Password must contain at least one uppercase letter, one lowercase letter, one digit, and one special character")
 
     # Hash the password
