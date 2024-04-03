@@ -2,12 +2,13 @@ from fastapi import FastAPI, Depends, HTTPException, status, Form
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy import func
 from sqlalchemy.orm import Session
+from schemas import UserCreate
 import uvicorn
 from oauth2client.service_account import ServiceAccountCredentials
 import gspread
 import logging
 from typing import List
-from datetime import date
+from datetime import datetime
 import auth
 from models import DatasheetLink, TimeSheetData
 from database import SessionLocal
@@ -28,13 +29,46 @@ def get_db():
 
 # User registration endpoint
 @app.post("/register")
-async def register_user(first_name: str = Form(...), last_name: str = Form(...), email: str = Form(...), password: str = Form(...), super_user: bool = Form(False), db: Session = Depends(get_db)):
+async def register_user(
+    first_name: str = Form(...),
+    last_name: str = Form(...),
+    email: str = Form(...),
+    password: str = Form(...),
+    super_user: bool = Form(False),
+    db: Session = Depends(get_db)
+):
+    # Check if the email is already registered
     user = crud.get_user_by_email(db, email)
     if user:
         raise HTTPException(status_code=400, detail="Email already registered")
 
+    # Check if all fields are filled
+    if not (first_name and last_name and email and password):
+        raise HTTPException(status_code=400, detail="All fields are required")
+
+    # Check email format
+    if not crud.email_is_valid(email):
+        raise HTTPException(status_code=400, detail="Invalid email format")
+
+    # Check password complexity
+    if not crud.is_password_complex(password):
+        raise HTTPException(status_code=400, detail="Password must contain at least one uppercase letter, one lowercase letter, one digit, and one special character")
+
+    # Hash the password
     hashed_password = auth.get_password_hash(password)
-    db_user = crud.create_user(db=db, first_name=first_name, last_name=last_name, email=email, hashed_password=hashed_password, super_user=super_user)
+
+    # Create user data using Pydantic model
+    user_data = UserCreate(
+        first_name=first_name,
+        last_name=last_name,
+        email=email,
+        password=hashed_password,
+        super_user=super_user
+    )
+
+    # Create the user in the database
+    db_user = crud.create_user(db=db, user_data=user_data)
+
     return {"message": "User created successfully"}
 
 # User login endpoint
@@ -87,7 +121,8 @@ async def delete_master_project(project_id: int, db: Session = Depends(get_db)):
     return crud.delete_master_project(db, project_id)
 
 @app.post("/read-spreadsheet-data")
-async def read_spreadsheet_data(sheet_link: str, db: Session = Depends(get_db)):
+async def read_spreadsheet_data(db: Session = Depends(get_db)):
+    sheet_link = (db.query(DatasheetLink).filter(DatasheetLink.is_enabled == True).first()).datasheet_link
     # Google Sheets API authentication
     scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
     credentials = ServiceAccountCredentials.from_json_keyfile_name('credentials.json', scope)
@@ -128,43 +163,44 @@ async def get_timesheets_data(db: Session = Depends(get_db)):
     timesheets_data_json = crud.get_timesheets_data(db)
     return timesheets_data_json
 
-@app.delete("/delete-today-timesheet-data")
-async def delete_today_timesheet_data(db: Session = Depends(get_db)):
-    today_date = date.today()
-    print("Today's date:", today_date)
+# Endpoint to delete timesheet data for a specific date
+@app.delete("/delete-timesheet-data/{date_to_delete}")
+async def delete_timesheet_data(date_to_delete: str, db: Session = Depends(get_db)):
+    try:
+        date_obj = datetime.strptime(date_to_delete, "%Y-%m-%d").date()
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid date format. Use YYYY-MM-DD")
 
-    # Get today's timesheet data based on the date part only
-    timesheet_data = db.query(TimeSheetData).filter(
-        func.date(TimeSheetData.date) == today_date
-    ).all()
+    timesheet_data = db.query(TimeSheetData).filter(func.date(TimeSheetData.date) == date_obj).all()
 
     if not timesheet_data:
-        return {"message": "No timesheet data found for today"}
+        return {"message": "No timesheet data found for the specified date"}
 
-    print("Timesheet data to delete:", timesheet_data)
-
-    # Delete today's timesheet data
     for data in timesheet_data:
         db.delete(data)
 
     db.commit()
-    return {"message": "Today's timesheet data deleted successfully"}
+    return {"message": f"Timesheet data for {date_to_delete} deleted successfully"}
 
 # Endpoint to enter datasheet link
 @app.post("/save-datasheet-link")
 async def save_datasheet_link(datasheet_link: str = Form(...), db: Session = Depends(get_db)):
     existing_datasheets = db.query(DatasheetLink).all()
-
     for datasheet in existing_datasheets:
         datasheet.is_enabled = False
 
-    new_datasheet = DatasheetLink(datasheet_link=datasheet_link, is_enabled=True)
-    db.add(new_datasheet)
-    db.commit()
-    db.refresh(new_datasheet)
+    existing_datasheet = db.query(DatasheetLink).filter(DatasheetLink.datasheet_link == datasheet_link).first()
+    if existing_datasheet:
+        existing_datasheet.is_enabled = True
+        db.commit()
+        db.refresh(existing_datasheet)
+        return {"message": "Datasheet Link updated successfully", "datasheet_link": existing_datasheet.datasheet_link, "is_enabled": existing_datasheet.is_enabled}
+    else:
+        new_datasheet = DatasheetLink(datasheet_link=datasheet_link, is_enabled=True)
+        db.add(new_datasheet)
+        db.commit()
+        db.refresh(new_datasheet)
+        return {"message": "Datasheet Link saved successfully", "datasheet_link": new_datasheet.datasheet_link, "is_enabled": new_datasheet.is_enabled}
 
-    return {"message": "Datasheet Link saved successfully", "datasheet_link": new_datasheet.datasheet_link, "is_enabled": new_datasheet.is_enabled}
-
-@app.get("/")
-def read_root():
-    return {"Hello": "World"}
+if __name__ == "__main__":
+    uvicorn.run(app, host="0.0.0.0", port=8000)

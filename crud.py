@@ -3,6 +3,8 @@ from passlib.context import CryptContext
 from models import User, MasterDeveloper, MasterProjects, TimeSheetData
 import datetime
 import logging
+from schemas import UserCreate
+import re
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
@@ -20,12 +22,33 @@ def authenticate_user(db: Session, email: str, password: str):
 def get_user_by_email(db: Session, email: str):
     return db.query(User).filter(User.email == email).first()
 
-def create_user(db: Session, first_name: str, last_name: str, email: str, hashed_password: str, super_user: bool):
-    db_user = User(first_name=first_name, last_name=last_name, email=email, hashed_password=hashed_password, super_user=super_user)
+def create_user(db: Session, user_data: UserCreate):
+    db_user = User(
+        first_name=user_data.first_name,
+        last_name=user_data.last_name,
+        email=user_data.email,
+        hashed_password=user_data.password,
+        super_user=user_data.super_user
+    )
     db.add(db_user)
     db.commit()
     db.refresh(db_user)
     return db_user
+
+def email_is_valid(email: str) -> bool:
+    # Regular expression pattern for email validation
+    pattern = r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$"
+    
+    # Check if the email matches the pattern
+    if re.match(pattern, email):
+        return True
+    else:
+        return False
+
+def is_password_complex(password: str) -> bool:
+    # Regular expression pattern for password complexity
+    pattern = r"^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}$"
+    return bool(re.match(pattern, password))
 
 def create_master_developer(db: Session, name: str, team_lead: bool):
     developer = MasterDeveloper(name=name, team_lead=team_lead)
