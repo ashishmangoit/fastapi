@@ -2,7 +2,7 @@ from fastapi import FastAPI, Depends, HTTPException, status, Form
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy import func
 from sqlalchemy.orm import Session
-from schemas import UserCreate
+from schemas import UserCreate, UserLogin, CreateMasterDeveloper, CreateMasterProject, SetDatasheetLink
 import uvicorn
 from oauth2client.service_account import ServiceAccountCredentials
 import gspread
@@ -30,55 +30,50 @@ def get_db():
 # User registration endpoint
 @app.post("/register")
 async def register_user(
-    first_name: str = Form(...),
-    last_name: str = Form(...),
-    email: str = Form(...),
-    password: str = Form(...),
-    super_user: bool = Form(False),
+    user_data: UserCreate,
     db: Session = Depends(get_db)
 ):
     # Check if the email is already registered
-    user = crud.get_user_by_email(db, email)
+    user = crud.get_user_by_email(db, user_data.email)
+    
+    # Check email format
+    if not auth.email_is_valid(user_data.email):
+        raise HTTPException(status_code=400, detail="Invalid email format")
+    
+    # Check password complexity
+    if not auth.is_password_complex(user_data.password):
+        raise HTTPException(status_code=400, detail="Password must contain at least one uppercase letter, one lowercase letter, one digit, and one special character")
+    
     if user:
         raise HTTPException(status_code=400, detail="Email already registered")
 
-    # Check if all fields are filled
-    if not (first_name and last_name and email and password):
-        raise HTTPException(status_code=400, detail="All fields are required")
 
-    # Check email format
-    if (auth.email_is_valid(email) == False):
-        raise HTTPException(status_code=400, detail="Invalid email format")
-
-    # Check password complexity
-    if (auth.is_password_complex(password) == False):
-        raise HTTPException(status_code=400, detail="Password must contain at least one uppercase letter, one lowercase letter, one digit, and one special character")
 
     # Hash the password
-    hashed_password = auth.get_password_hash(password)
+    hashed_password = auth.get_password_hash(user_data.password)
 
     # Create user data using Pydantic model
-    user_data = UserCreate(
-        first_name=first_name,
-        last_name=last_name,
-        email=email,
+    user_create_data = UserCreate(
+        first_name=user_data.first_name,
+        last_name=user_data.last_name,
+        email=user_data.email,
         password=hashed_password,
-        super_user=super_user
+        super_user=user_data.super_user
     )
 
     # Create the user in the database
-    db_user = crud.create_user(db=db, user_data=user_data)
+    db_user = crud.create_user(db=db, user_data=user_create_data)
 
     return {"message": "User created successfully"}
 
 # User login endpoint
 @app.post("/login")
-async def login_user(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
-    user = crud.authenticate_user(db, form_data.username, form_data.password)
+async def login_user(user_data: UserLogin, db: Session = Depends(get_db)):
+    user = auth.authenticate_user(db, user_data.email, user_data.password)
     if not user:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Incorrect username or password",
+            detail="Incorrect email or password",
             headers={"WWW-Authenticate": "Bearer"},
         )
 
@@ -86,10 +81,11 @@ async def login_user(form_data: OAuth2PasswordRequestForm = Depends(), db: Sessi
     response = {"access_token": access_token, "token_type": "bearer"}
     return response
 
+
 # Endpoint to enter values for MasterDeveloper
 @app.post("/create-master-developer")
-async def create_master_developer(name: str = Form(...), team_lead: bool = Form(False), db: Session = Depends(get_db)):
-    new_developer = crud.create_master_developer(db=db, name=name, team_lead=team_lead)
+async def create_master_developer(developer_data: CreateMasterDeveloper, db: Session = Depends(get_db)):
+    new_developer = crud.create_master_developer(db=db, name=developer_data.name, team_lead=developer_data.team_lead)
     return {"message": "Master Developer created successfully", "new_developer": new_developer.id}
 
 # Endpoint to get all MasterDevelopers
@@ -105,8 +101,8 @@ async def delete_master_developer(developer_id: int, db: Session = Depends(get_d
 
 # Endpoint to enter values for MasterProjects
 @app.post("/create-master-project")
-async def create_master_project(project_name: str = Form(...), db: Session = Depends(get_db)):
-    new_project = crud.create_master_project(db=db, project_name=project_name)
+async def create_master_project(project_data: CreateMasterProject, db: Session = Depends(get_db)):
+    new_project = crud.create_master_project(db=db, project_name=project_data.project_name)
     return {"message": "Master Project created successfully", "project_id": new_project.id}
 
 # Endpoint to get all MasterProjects
@@ -184,19 +180,19 @@ async def delete_timesheet_data(date_to_delete: str, db: Session = Depends(get_d
 
 # Endpoint to enter datasheet link
 @app.post("/save-datasheet-link")
-async def save_datasheet_link(datasheet_link: str = Form(...), db: Session = Depends(get_db)):
+async def save_datasheet_link(set_datasheet_link: SetDatasheetLink, db: Session = Depends(get_db)):
     existing_datasheets = db.query(DatasheetLink).all()
     for datasheet in existing_datasheets:
         datasheet.is_enabled = False
 
-    existing_datasheet = db.query(DatasheetLink).filter(DatasheetLink.datasheet_link == datasheet_link).first()
+    existing_datasheet = db.query(DatasheetLink).filter(DatasheetLink.datasheet_link == set_datasheet_link.datasheet_link).first()
     if existing_datasheet:
         existing_datasheet.is_enabled = True
         db.commit()
         db.refresh(existing_datasheet)
         return {"message": "Datasheet Link updated successfully", "datasheet_link": existing_datasheet.datasheet_link, "is_enabled": existing_datasheet.is_enabled}
     else:
-        new_datasheet = DatasheetLink(datasheet_link=datasheet_link, is_enabled=True)
+        new_datasheet = DatasheetLink(datasheet_link=set_datasheet_link.datasheet_link, is_enabled=True)
         db.add(new_datasheet)
         db.commit()
         db.refresh(new_datasheet)

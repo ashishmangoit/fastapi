@@ -6,3 +6,17 @@ class UserCreate(BaseModel):
     email: EmailStr
     password: str
     super_user: bool = False
+
+class UserLogin(BaseModel):
+    email: EmailStr
+    password: str
+
+class CreateMasterDeveloper(BaseModel):
+    name: str
+    team_lead: bool = False
+
+class CreateMasterProject(BaseModel):
+    project_name: str
+
+class SetDatasheetLink(BaseModel):
+    datasheet_link: str

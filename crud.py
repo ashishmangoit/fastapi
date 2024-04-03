@@ -1,23 +1,7 @@
 from sqlalchemy.orm import Session
-from passlib.context import CryptContext
 from models import User, MasterDeveloper, MasterProjects, TimeSheetData
-import datetime
 import logging
 from schemas import UserCreate
-import re
-
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-
-def get_password_hash(password):
-    return pwd_context.hash(password)
-
-def authenticate_user(db: Session, email: str, password: str):
-    user = db.query(User).filter(User.email == email).first()
-    if not user:
-        return False
-    if not pwd_context.verify(password, user.hashed_password):
-        return False
-    return user
 
 def get_user_by_email(db: Session, email: str):
     return db.query(User).filter(User.email == email).first()
