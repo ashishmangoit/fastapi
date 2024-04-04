@@ -145,6 +145,9 @@ async def read_spreadsheet_data(db: Session = Depends(get_db)):
 @app.post("/save-timesheet-data")
 def save_timesheet_data_endpoint(timesheet_data: List[dict], db: Session = Depends(get_db)):
     try:
+        if not timesheet_data or not timesheet_data[0]:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No valid timesheet data received")
+        
         saved_timesheets = crud.save_timesheet_data(timesheet_data, db)
         if saved_timesheets:
             return {"message": "TimeSheetData saved successfully"}
