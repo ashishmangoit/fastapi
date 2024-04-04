@@ -1,17 +1,16 @@
-from fastapi import FastAPI, Depends, HTTPException, status, Form
+from fastapi import FastAPI, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy import func
 from sqlalchemy.orm import Session
-from schemas import UserCreate, UserLogin, CreateMasterDeveloper, CreateMasterProject, SetDatasheetLink
-import uvicorn
 from oauth2client.service_account import ServiceAccountCredentials
-import gspread
-import logging
 from typing import List
 from datetime import datetime
-import auth
+import gspread
+import logging
+from schemas import UserCreate, CreateMasterDeveloper, CreateMasterProject, SetDatasheetLink
 from models import DatasheetLink, TimeSheetData
 from database import SessionLocal
+import auth
 import crud
 
 app = FastAPI()
@@ -33,21 +32,19 @@ async def register_user(
     user_data: UserCreate,
     db: Session = Depends(get_db)
 ):
-    # Check if the email is already registered
-    user = crud.get_user_by_email(db, user_data.email)
-    
     # Check email format
     if not auth.email_is_valid(user_data.email):
         raise HTTPException(status_code=400, detail="Invalid email format")
-    
+
     # Check password complexity
     if not auth.is_password_complex(user_data.password):
         raise HTTPException(status_code=400, detail="Password must contain at least one uppercase letter, one lowercase letter, one digit, and one special character")
-    
+
+    # Check if the email is already registered
+    user = crud.get_user_by_email(db, user_data.email)
+
     if user:
         raise HTTPException(status_code=400, detail="Email already registered")
-
-
 
     # Hash the password
     hashed_password = auth.get_password_hash(user_data.password)
@@ -67,20 +64,34 @@ async def register_user(
     return {"message": "User created successfully"}
 
 # User login endpoint
-@app.post("/login")
-async def login_user(user_data: UserLogin, db: Session = Depends(get_db)):
-    user = auth.authenticate_user(db, user_data.email, user_data.password)
+@app.post("/login/", response_model=dict)
+async def login_user(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
+    # Check email format
+    if not auth.email_is_valid(form_data.username):
+        raise HTTPException(status_code=400, detail="Invalid email format")
+
+    user = await auth.authenticate_user(db, form_data.username, form_data.password)
     if not user:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect email or password",
             headers={"WWW-Authenticate": "Bearer"},
         )
-
     access_token = auth.create_access_token(data={"sub": user.email})
-    response = {"access_token": access_token, "token_type": "bearer"}
-    return response
+    refresh_token = auth.create_refresh_token(data={"sub": user.email})
+    
+    return {"access_token": access_token, "refresh_token": refresh_token, "token_type": "bearer"}
 
+# User logout endpoint
+@app.post("/logout/")
+async def logout_user(current_user: str = Depends(auth.get_current_user)):
+    # Your logout logic here, for example, invalidating the token
+    return {"message": "Logout successful"}
+
+@app.post("/refresh-token/")
+async def refresh_token(refresh_token: str):
+    get_refresh_token_data = await auth.get_refresh_token(refresh_token)
+    return get_refresh_token_data
 
 # Endpoint to enter values for MasterDeveloper
 @app.post("/create-master-developer")
@@ -148,6 +159,11 @@ def save_timesheet_data_endpoint(timesheet_data: List[dict], db: Session = Depen
         if not timesheet_data or not timesheet_data[0]:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No valid timesheet data received")
         
+        # Validate the structure of each timesheet entry
+        for entry in timesheet_data:
+            if not isinstance(entry, dict) or "developer_id" not in entry or "team_lead_id" not in entry or "project_id" not in entry or "hours" not in entry:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid timesheet data format")
+
         saved_timesheets = crud.save_timesheet_data(timesheet_data, db)
         if saved_timesheets:
             return {"message": "TimeSheetData saved successfully"}
@@ -202,4 +218,5 @@ async def save_datasheet_link(set_datasheet_link: SetDatasheetLink, db: Session 
         return {"message": "Datasheet Link saved successfully", "datasheet_link": new_datasheet.datasheet_link, "is_enabled": new_datasheet.is_enabled}
 
 if __name__ == "__main__":
+    import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
